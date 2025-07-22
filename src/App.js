@@ -33,7 +33,10 @@ function App() {
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState('');
     const [performanceData, setPerformanceData] = useState([]);
-    const [apiKey, setApiKey] = useState('AIzaSyAAYzNzXtz6vyDpTOM4ccf0OK879ZY4Qc0');
+    const [geminiApiKey, setGeminiApiKey] = useState('AIzaSyAAYzNzXtz6vyDpTOM4ccf0OK879ZY4Qc0');
+    const [openRouterApiKey, setOpenRouterApiKey] = useState('');
+    const [apiProvider, setApiProvider] = useState('gemini'); // 'gemini' or 'openrouter'
+    const [openRouterModel, setOpenRouterModel] = useState('qwen/qwen3-235b-a22b-07-25:free');
     const [error, setError] = useState(null);
 
     // --- Helper Functions ---
@@ -49,7 +52,6 @@ function App() {
         reader.onerror = error => reject(error);
     });
     
-    // --- API Call Helper with Retry Logic ---
     const fetchWithRetry = async (url, options, maxRetries = 3) => {
         let lastError = null;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -60,7 +62,7 @@ function App() {
                     const errorBody = await response.json();
                     throw new Error(`API Error: ${response.status} - ${errorBody.error?.message || 'Unknown error'}`);
                 }
-                return response.json(); // Success
+                return response.json();
             } catch (err) {
                 lastError = err;
                 console.error(`Attempt ${attempt + 1} failed:`, err.message);
@@ -74,9 +76,16 @@ function App() {
     };
 
     // --- API Interactions ---
-    const callGeminiAPI = async (prompt, base64ImageData = null, schema = null, mimeType = null) => {
-        // Use Gemini 1.5 Pro for all text analysis
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${apiKey}`;
+    const callApi = async (prompt, base64ImageData = null, schema = null, mimeType = null) => {
+        if (apiProvider === 'gemini') {
+            return callGeminiAPI(prompt, base64ImageData, schema, mimeType);
+        } else {
+            return callOpenRouterAPI(prompt, base64ImageData, schema, mimeType);
+        }
+    };
+
+    const callGeminiAPI = async (prompt, base64ImageData, schema, mimeType) => {
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${geminiApiKey}`;
         let parts = [{ text: prompt }];
         if (base64ImageData && mimeType) parts.push({ inlineData: { mimeType, data: base64ImageData } });
         const payload = { contents: [{ role: "user", parts }] };
@@ -89,6 +98,34 @@ function App() {
             return schema ? JSON.parse(responseText) : responseText;
         }
         throw new Error("Invalid response from Gemini 1.5 Pro.");
+    };
+
+    const callOpenRouterAPI = async (prompt, base64ImageData, schema, mimeType) => {
+        const apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
+        let messages = [{ role: 'user', content: [{ type: 'text', text: prompt }] }];
+        if (base64ImageData && mimeType) {
+            messages[0].content.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64ImageData}` } });
+        }
+
+        const payload = {
+            model: openRouterModel,
+            messages: messages,
+        };
+        if (schema) {
+            payload.response_format = { type: 'json_object', schema: schema };
+        }
+
+        const result = await fetchWithRetry(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openRouterApiKey}` },
+            body: JSON.stringify(payload)
+        });
+
+        if (result.choices?.[0]?.message?.content) {
+            const responseText = result.choices[0].message.content;
+            return schema ? JSON.parse(responseText) : responseText;
+        }
+        throw new Error("Invalid response from OpenRouter.");
     };
 
     const handleApiError = (err) => {
@@ -107,7 +144,7 @@ function App() {
             const { mimeType, base64Data } = await toBase64(file);
             const prompt = "You are an expert academic assistant. Analyze the provided image of a math, science, or chemistry problem sheet. Extract each distinct question. Return the result as a JSON array of objects, where each object has an 'id' (a unique string like 'q1') and a 'text' field. Ensure all mathematical notation is valid LaTeX (e.g., $...$, $$...$$) and chemical formulas use the mhchem `\\ce{}` format (e.g., `\\ce{H2O}`).";
             const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { id: { type: "STRING" }, text: { type: "STRING" } }, required: ["id", "text"] } };
-            const result = await callGeminiAPI(prompt, base64Data, schema, mimeType);
+            const result = await callApi(prompt, base64Data, schema, mimeType);
             if (result) {
                 setQuestions(result);
                 setView('question');
@@ -129,7 +166,7 @@ function App() {
             const textPrompt = `Analyze the user's handwritten solution (in the image) for the problem: "${currentQuestion.text}". Determine if the final answer is correct. Identify the exact mistake step. Provide a clear, step-by-step correct approach using LaTeX for math and \\ce{} for chemistry. Explain the problem's crux. Identify the main conceptual gap and related micro-concepts. Return a structured JSON.`;
             const schema = { type: "OBJECT", properties: { isCorrect: { type: "BOOLEAN" }, mistakeStep: { type: "STRING" }, correctApproach: { type: "STRING" }, problemCrux: { type: "STRING" }, conceptualGaps: { type: "OBJECT", properties: { mainConcept: { type: "STRING" }, microConcepts: { type: "ARRAY", items: { "type": "STRING" } } } }, generalPattern: { type: "STRING" } }, required: ["isCorrect", "mistakeStep", "correctApproach", "problemCrux", "conceptualGaps", "generalPattern"] };
             
-            const textResult = await callGeminiAPI(textPrompt, base64Data, schema, mimeType);
+            const textResult = await callApi(textPrompt, base64Data, schema, mimeType);
             
             if (textResult) {
                 setFeedback(textResult);
@@ -157,7 +194,7 @@ function App() {
             const summaryText = Object.entries(summary).map(([main, micros]) => `${main}: ${Array.from(micros).join(', ')}`).join('; ');
             const prompt = `Based on this performance summary: ${summaryText || 'general calculus and chemistry'}. Generate 3 new practice problems targeting these concepts. Ramp up difficulty slightly. Return a JSON array of objects with 'id' and 'text' fields. Use LaTeX for math and \\ce{} for chemistry.`;
             const schema = { type: "ARRAY", items: { type: "OBJECT", properties: { id: { type: "STRING" }, text: { type: "STRING" } }, required: ["id", "text"] } };
-            const newProblems = await callGeminiAPI(prompt, null, schema);
+            const newProblems = await callApi(prompt, null, schema);
             if (newProblems) {
                 setQuestions(newProblems);
                 setCurrentQuestionIndex(0);
@@ -179,7 +216,6 @@ function App() {
         }
     };
 
-    // --- Render Logic ---
     const renderView = () => {
         if (isLoading && !feedback) return <LoadingScreen message={loadingMessage || 'Working on it...'} />;
         if (error) return <ErrorScreen message={error} onClear={() => { setError(null); setIsLoading(false); }} />;
@@ -193,7 +229,7 @@ function App() {
     };
 
     return (
-        <AppContext.Provider value={{ view, questions, currentQuestionIndex, feedback, performanceData, apiKey, setApiKey, handleProblemSheetUpload, handleSolutionUpload, goToNextQuestion, generateNewProblems, isLoading, loadingMessage }}>
+        <AppContext.Provider value={{ questions, currentQuestionIndex, feedback, performanceData, geminiApiKey, setGeminiApiKey, openRouterApiKey, setOpenRouterApiKey, apiProvider, setApiProvider, openRouterModel, setOpenRouterModel, handleProblemSheetUpload, handleSolutionUpload, goToNextQuestion, generateNewProblems, isLoading, loadingMessage }}>
             <div className="font-minecraft bg-stone-700 text-white min-h-screen w-full flex flex-col items-center justify-center p-4">
                 <div className="w-full max-w-md mx-auto">
                     {renderView()}
@@ -242,19 +278,48 @@ function ErrorScreen({ message, onClear }) {
 }
 
 function UploadScreen() {
-    const { handleProblemSheetUpload, apiKey, setApiKey } = useContext(AppContext);
+    const { handleProblemSheetUpload, geminiApiKey, setGeminiApiKey, openRouterApiKey, setOpenRouterApiKey, apiProvider, setApiProvider, openRouterModel, setOpenRouterModel } = useContext(AppContext);
     const fileInputRef = useRef(null);
     const onFileChange = (e) => { if (e.target.files?.[0]) handleProblemSheetUpload(e.target.files[0]); };
+    
+    const isReady = apiProvider === 'gemini' ? geminiApiKey : openRouterApiKey;
+
     return (
         <Card className="text-center text-black">
             <h1 className="text-3xl font-bold mb-2">AI Study Buddy</h1>
             <p className="mb-6">Upload a photo of your problem set to begin.</p>
-            <div className="w-full mb-6">
-                <label htmlFor="apiKey" className="text-sm block text-left mb-1">Gemini API Key</label>
-                <input id="apiKey" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black placeholder-stone-600 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter your Gemini API Key" />
+            
+            <div className="w-full mb-4">
+                <label htmlFor="apiProvider" className="text-sm block text-left mb-1">AI Provider</label>
+                <select id="apiProvider" value={apiProvider} onChange={(e) => setApiProvider(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openrouter">OpenRouter</option>
+                </select>
             </div>
+
+            {apiProvider === 'gemini' ? (
+                <div className="w-full mb-4">
+                    <label htmlFor="geminiApiKey" className="text-sm block text-left mb-1">Gemini API Key</label>
+                    <input id="geminiApiKey" type="password" value={geminiApiKey} onChange={(e) => setGeminiApiKey(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black placeholder-stone-600 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter your Gemini API Key" />
+                </div>
+            ) : (
+                <>
+                    <div className="w-full mb-4">
+                        <label htmlFor="openRouterApiKey" className="text-sm block text-left mb-1">OpenRouter API Key</label>
+                        <input id="openRouterApiKey" type="password" value={openRouterApiKey} onChange={(e) => setOpenRouterApiKey(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black placeholder-stone-600 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter your OpenRouter API Key" />
+                    </div>
+                    <div className="w-full mb-6">
+                        <label htmlFor="openRouterModel" className="text-sm block text-left mb-1">OpenRouter Model</label>
+                        <select id="openRouterModel" value={openRouterModel} onChange={(e) => setOpenRouterModel(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="qwen/qwen3-235b-a22b-07-25:free">Qwen 3.2 (Free)</option>
+                            <option value="moonshotai/kimi-k2:free">Kimi K2 (Free)</option>
+                        </select>
+                    </div>
+                </>
+            )}
+
             <input type="file" accept="image/*,application/pdf" ref={fileInputRef} onChange={onFileChange} className="hidden" />
-            <Button onClick={() => fileInputRef.current.click()} disabled={!apiKey} className="bg-lime-500 text-black">
+            <Button onClick={() => fileInputRef.current.click()} disabled={!isReady} className="bg-lime-500 text-black">
                 <UploadCloudIcon /> Analyze Problems
             </Button>
         </Card>
