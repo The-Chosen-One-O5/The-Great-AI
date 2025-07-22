@@ -35,7 +35,6 @@ function App() {
     const [performanceData, setPerformanceData] = useState([]);
     const [apiKey, setApiKey] = useState('AIzaSyAAYzNzXtz6vyDpTOM4ccf0OK879ZY4Qc0');
     const [error, setError] = useState(null);
-    const fileInputRef = useRef(null);
 
     // --- Helper Functions ---
     const toBase64 = file => new Promise((resolve, reject) => {
