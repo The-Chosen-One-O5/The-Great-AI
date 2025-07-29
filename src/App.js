@@ -34,9 +34,9 @@ function App() {
     const [loadingMessage, setLoadingMessage] = useState('');
     const [performanceData, setPerformanceData] = useState([]);
     const [geminiApiKey, setGeminiApiKey] = useState('AIzaSyAAYzNzXtz6vyDpTOM4ccf0OK879ZY4Qc0');
-    const [openRouterApiKey, setOpenRouterApiKey] = useState('');
-    const [apiProvider, setApiProvider] = useState('gemini'); // 'gemini' or 'openrouter'
-    const [openRouterModel, setOpenRouterModel] = useState('qwen/qwen3-235b-a22b-07-25:free');
+    const [typegptApiKey, setTypegptApiKey] = useState('');
+    const [apiProvider, setApiProvider] = useState('gemini'); // 'gemini' or 'typegpt'
+    const [typegptModel, setTypegptModel] = useState('google/gemini-2.5-pro');
     const [error, setError] = useState(null);
 
     // --- Helper Functions ---
@@ -80,7 +80,7 @@ function App() {
         if (apiProvider === 'gemini') {
             return callGeminiAPI(prompt, base64ImageData, schema, mimeType);
         } else {
-            return callOpenRouterAPI(prompt, base64ImageData, schema, mimeType);
+            return callTYPEGPTAPI(prompt, base64ImageData, schema, mimeType);
         }
     };
 
@@ -100,15 +100,15 @@ function App() {
         throw new Error("Invalid response from Gemini 1.5 Pro.");
     };
 
-    const callOpenRouterAPI = async (prompt, base64ImageData, schema, mimeType) => {
-        const apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
+    const callTYPEGPTAPI = async (prompt, base64ImageData, schema, mimeType) => {
+        const apiUrl = 'https://wow.typegpt.net/v1/chat/completions';
         let messages = [{ role: 'user', content: [{ type: 'text', text: prompt }] }];
         if (base64ImageData && mimeType) {
             messages[0].content.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64ImageData}` } });
         }
 
         const payload = {
-            model: openRouterModel,
+            model: typegptModel,
             messages: messages,
         };
         if (schema) {
@@ -117,7 +117,7 @@ function App() {
 
         const result = await fetchWithRetry(apiUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openRouterApiKey}` },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${typegptApiKey}` },
             body: JSON.stringify(payload)
         });
 
@@ -125,7 +125,7 @@ function App() {
             const responseText = result.choices[0].message.content;
             return schema ? JSON.parse(responseText) : responseText;
         }
-        throw new Error("Invalid response from OpenRouter.");
+        throw new Error("Invalid response from TYPEGPT.");
     };
 
     const handleApiError = (err) => {
@@ -229,7 +229,7 @@ function App() {
     };
 
     return (
-        <AppContext.Provider value={{ questions, currentQuestionIndex, feedback, performanceData, geminiApiKey, setGeminiApiKey, openRouterApiKey, setOpenRouterApiKey, apiProvider, setApiProvider, openRouterModel, setOpenRouterModel, handleProblemSheetUpload, handleSolutionUpload, goToNextQuestion, generateNewProblems, isLoading, loadingMessage }}>
+        <AppContext.Provider value={{ questions, currentQuestionIndex, feedback, performanceData, geminiApiKey, setGeminiApiKey, typegptApiKey, setTypegptApiKey, apiProvider, setApiProvider, typegptModel, setTypegptModel, handleProblemSheetUpload, handleSolutionUpload, goToNextQuestion, generateNewProblems, isLoading, loadingMessage }}>
             <div className="font-minecraft bg-stone-700 text-white min-h-screen w-full flex flex-col items-center justify-center p-4">
                 <div className="w-full max-w-md mx-auto">
                     {renderView()}
@@ -278,11 +278,11 @@ function ErrorScreen({ message, onClear }) {
 }
 
 function UploadScreen() {
-    const { handleProblemSheetUpload, geminiApiKey, setGeminiApiKey, openRouterApiKey, setOpenRouterApiKey, apiProvider, setApiProvider, openRouterModel, setOpenRouterModel } = useContext(AppContext);
+    const { handleProblemSheetUpload, geminiApiKey, setGeminiApiKey, typegptApiKey, setTypegptApiKey, apiProvider, setApiProvider, typegptModel, setTypegptModel } = useContext(AppContext);
     const fileInputRef = useRef(null);
     const onFileChange = (e) => { if (e.target.files?.[0]) handleProblemSheetUpload(e.target.files[0]); };
     
-    const isReady = apiProvider === 'gemini' ? geminiApiKey : openRouterApiKey;
+    const isReady = apiProvider === 'gemini' ? geminiApiKey : typegptApiKey;
 
     return (
         <Card className="text-center text-black">
@@ -293,7 +293,7 @@ function UploadScreen() {
                 <label htmlFor="apiProvider" className="text-sm block text-left mb-1">AI Provider</label>
                 <select id="apiProvider" value={apiProvider} onChange={(e) => setApiProvider(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="gemini">Google Gemini</option>
-                    <option value="openrouter">OpenRouter</option>
+                    <option value="typegpt">TYPEGPT</option>
                 </select>
             </div>
 
@@ -305,14 +305,14 @@ function UploadScreen() {
             ) : (
                 <>
                     <div className="w-full mb-4">
-                        <label htmlFor="openRouterApiKey" className="text-sm block text-left mb-1">OpenRouter API Key</label>
-                        <input id="openRouterApiKey" type="password" value={openRouterApiKey} onChange={(e) => setOpenRouterApiKey(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black placeholder-stone-600 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter your OpenRouter API Key" />
+                        <label htmlFor="typegptApiKey" className="text-sm block text-left mb-1">TYPEGPT API Key</label>
+                        <input id="typegptApiKey" type="password" value={typegptApiKey} onChange={(e) => setTypegptApiKey(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black placeholder-stone-600 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter your TYPEGPT API Key" />
                     </div>
                     <div className="w-full mb-6">
-                        <label htmlFor="openRouterModel" className="text-sm block text-left mb-1">OpenRouter Model</label>
-                        <select id="openRouterModel" value={openRouterModel} onChange={(e) => setOpenRouterModel(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="qwen/qwen3-235b-a22b-07-25:free">Qwen 3.2 (Free)</option>
-                            <option value="moonshotai/kimi-k2:free">Kimi K2 (Free)</option>
+                        <label htmlFor="typegptModel" className="text-sm block text-left mb-1">TYPEGPT Model</label>
+                        <select id="typegptModel" value={typegptModel} onChange={(e) => setTypegptModel(e.target.value)} className="w-full bg-stone-300 border-2 border-stone-500 p-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="google/gemini-2.5-pro">Google Gemini 2.5 Pro</option>
+                            <option value="Qwen/QwQ-32B">Qwen QwQ-32B</option>
                         </select>
                     </div>
                 </>
